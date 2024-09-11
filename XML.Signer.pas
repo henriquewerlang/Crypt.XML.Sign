@@ -9,6 +9,8 @@ type
   private
     FCertificate: PCERT_CONTEXT;
     FCertificateStore: HCERTSTORE;
+    FKeySpec: CERT_KEY_SPEC;
+    FPrivateKey: HCRYPTPROV_OR_NCRYPT_KEY_HANDLE;
   public
     destructor Destroy; override;
 
@@ -16,6 +18,8 @@ type
     procedure Load(const FileName, Password: String); overload;
 
     property Certificate: PCERT_CONTEXT read FCertificate;
+    property KeySpec: CERT_KEY_SPEC read FKeySpec;
+    property PrivateKey: HCRYPTPROV_OR_NCRYPT_KEY_HANDLE read FPrivateKey;
   end;
 
   TCertificateChain = class
@@ -33,7 +37,7 @@ type
   private
     FSignature: Pointer;
   public
-    procedure Sign(const Certificate: TCertificate; const SignaturePath, XML: String);
+    function Sign(const Certificate: TCertificate; const SignaturePath, URI, XML: String): String;
   end;
 
 implementation
@@ -41,7 +45,12 @@ implementation
 uses System.IOUtils;
 
 function CertGetCertificateChain(hChainEngine: HCERTCHAINENGINE; pCertContext: PCERT_CONTEXT; pTime: PFILETIME; hAdditionalStore: HCERTSTORE; pChainPara: PCERT_CHAIN_PARA; dwFlags: Cardinal; pvReserved: PPointer; out ppChainContext: PCERT_CHAIN_CONTEXT): BOOL; stdcall; external 'CRYPT32.dll' name 'CertGetCertificateChain';
-//function CryptXmlOpenToEncode(pConfig: PCRYPT_XML_TRANSFORM_CHAIN_CONFIG; dwFlags: CRYPT_XML_FLAGS; wszId: PWSTR; rgProperty: PCRYPT_XML_PROPERTY; cProperty: Cardinal; pEncoded: PCRYPT_XML_BLOB; phSignature: Pointer): HRESULT; stdcall; external 'CRYPTXML.dll' name 'CryptXmlOpenToEncode';
+
+function WriteXML(Callback: PPointer; Data: PByte; Size: Cardinal): HRESULT; stdcall;
+begin
+  PString(Callback^)^ := PString(Callback^)^ + TEncoding.UTF8.GetString(TBytes(Data), 0, Size);
+end;
+
 
 { TCertificate }
 
@@ -72,10 +81,15 @@ begin
   if not Assigned(FCertificateStore) then
     raise Exception.Create('Can''t load the certificate file!');
 
-  FCertificate := CertFindCertificateInStore(FCertificateStore, X509_ASN_ENCODING or PKCS_7_ASN_ENCODING, 0, CERT_FIND_HAS_PRIVATE_KEY, nil, nil);
+  FCertificate := CertFindCertificateInStore(FCertificateStore, X509_ASN_ENCODING, 0, CERT_FIND_HAS_PRIVATE_KEY, nil, nil);
 
   if not Assigned(FCertificate) then
     raise Exception.Create('A valid certificate doesn''t found!');
+
+  var CallerFree: BOOL := FALSE;
+
+  if CryptAcquireCertificatePrivateKey(FCertificate, CRYPT_ACQUIRE_CACHE_FLAG, nil, FPrivateKey, @KeySpec, @CallerFree) = FALSE then
+    RaiseLastOSError;
 end;
 
 { TCertificateChain }
@@ -100,18 +114,41 @@ end;
 
 { TSigner }
 
-procedure TSigner.Sign(const Certificate: TCertificate; const SignaturePath, XML: String);
+function TSigner.Sign(const Certificate: TCertificate; const SignaturePath, URI, XML: String): String;
+
+  function CreateAlgorithm(const NameSpace: String): CRYPT_XML_ALGORITHM;
+  begin
+    Result.cbSize := SizeOf(Result);
+    Result.Encoded.cbData := 0;
+    Result.Encoded.dwCharset := CRYPT_XML_CHARSET_AUTO;
+    Result.Encoded.pbData := nil;
+    Result.wszAlgorithm := PChar(NameSpace);
+  end;
+
+  procedure CheckReturn(const Value: HRESULT);
+  begin
+    if Value <> S_OK then
+      RaiseLastOSError;
+  end;
+
 begin
+  var CanonicalizationMethod := CreateAlgorithm(wszURI_CANONICALIZATION_EXSLUSIVE_C14N);
+  var CertificateBlob: CERT_BLOB;
   var Chain := TCertificateChain.Create;
+  var DigestMethod := CreateAlgorithm(wszURI_XMLNS_DIGSIG_SHA1);
   var EncodedXML: CRYPT_XML_BLOB;
-  var Properties: TArray<CRYPT_XML_PROPERTY>;
+  var KeyInfo: CRYPT_XML_KEYINFO_PARAM;
+  var Path := PChar(SignaturePath);
+  var Properties: CRYPT_XML_PROPERTY;
+  var ReferenceValue: Pointer := nil;
+  var SelfValue: Pointer := @Result;
+  var SignatureMethod := CreateAlgorithm(wszURI_XMLNS_DIGSIG_RSA_SHA1);
+  var ValueTrue: BOOL := TRUE;
   var XMLConverted := TEncoding.UTF8.GetBytes(XML);
 
-  SetLength(Properties, 1);
-
-  Properties[0].dwPropId := CRYPT_XML_PROPERTY_SIGNATURE_LOCATION;
-  Properties[0].cbValue := SizeOf(LPCWSTR);
-  Properties[0].pvValue := PChar(SignaturePath);
+  Properties.dwPropId := CRYPT_XML_PROPERTY_SIGNATURE_LOCATION;
+  Properties.cbValue := SizeOf(LPCWSTR);
+  Properties.pvValue := @Path;
 
   Chain.Load(Certificate);
 
@@ -119,8 +156,25 @@ begin
   EncodedXML.dwCharset := CRYPT_XML_CHARSET_UTF8;
   EncodedXML.pbData := @XMLConverted[0];
 
-  if CryptXmlOpenToEncode(nil, 0, nil, @Properties[0], 1, @EncodedXML, FSignature) <> S_OK then
-    RaiseLastOSError;
+  FillChar(KeyInfo, SizeOf(KeyInfo), 0);
+
+  KeyInfo.cCertificate := 1;
+  KeyInfo.rgCertificate := @CertificateBlob;
+
+  CertificateBlob.cbData := Certificate.Certificate.cbCertEncoded;
+  CertificateBlob.pbData := Certificate.Certificate.pbCertEncoded;
+
+  CheckReturn(CryptXmlOpenToEncode(nil, 0, nil, @Properties, 1, @EncodedXML, FSignature));
+
+  CheckReturn(CryptXmlCreateReference(FSignature, 0, nil, PChar(URI), nil, @DigestMethod, 0, nil, ReferenceValue));
+
+  CheckReturn(CryptXmlSign(FSignature, Certificate.PrivateKey, Certificate.KeySpec, 0, CRYPT_XML_KEYINFO_SPEC_PARAM, @KeyInfo, @SignatureMethod, @CanonicalizationMethod));
+
+  Properties.dwPropId := CRYPT_XML_PROPERTY_DOC_DECLARATION;
+  Properties.cbValue := SizeOf(ValueTrue);
+  Properties.pvValue := @ValueTrue;
+
+  CheckReturn(CryptXmlEncode(FSignature, CRYPT_XML_CHARSET_UTF8, @Properties, 1, SelfValue, WriteXML));
 end;
 
 end.
