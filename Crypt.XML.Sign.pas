@@ -2,12 +2,12 @@
 
 interface
 
-uses System.Classes, System.SysUtils, Winapi.Windows, Windows.Foundation, Windows.Security.Cryptography;
+uses System.Classes, System.SysUtils, System.Generics.Collections, Winapi.Windows, Windows.Foundation, Windows.Security.Cryptography;
 
 type
   TCertificate = class
   private
-    FCertificate: PCERT_CONTEXT;
+    FContext: PCERT_CONTEXT;
     FCertificateStore: HCERTSTORE;
     FKeySpec: CERT_KEY_SPEC;
     FPrivateKey: HCRYPTPROV_OR_NCRYPT_KEY_HANDLE;
@@ -18,27 +18,172 @@ type
     procedure Load(const FileName, Password: String); overload;
     procedure Load(const Stream: TStream; const Password: String); overload;
 
-    property Certificate: PCERT_CONTEXT read FCertificate;
+    property Context: PCERT_CONTEXT read FContext;
     property KeySpec: CERT_KEY_SPEC read FKeySpec;
     property PrivateKey: HCRYPTPROV_OR_NCRYPT_KEY_HANDLE read FPrivateKey;
   end;
 
-  TCertificateChain = class
+  TAlgorithm = class
   private
-    FChain: PCERT_CHAIN_CONTEXT;
+    FAlgorithm: CRYPT_XML_ALGORITHM;
   public
-    destructor Destroy; override;
+    constructor Create(const Algorithm: String);
 
-    procedure Load(const Certificate: TCertificate);
+    property Algorithm: CRYPT_XML_ALGORITHM read FAlgorithm write FAlgorithm;
+  end;
 
-    property Chain: PCERT_CHAIN_CONTEXT read FChain write FChain;
+  TTransform = class(TAlgorithm)
+  end;
+
+  TTransformBase64 = class(TTransform)
+  public
+    constructor Create;
+  end;
+
+  TTransformEveloped = class(TTransform)
+  public
+    constructor Create;
+  end;
+
+  TCanonicalizationMethod = class(TAlgorithm)
+  end;
+
+  TCanonicalizationC14C = class(TCanonicalizationMethod)
+  public
+    constructor Create;
+  end;
+
+  TCanonicalizationC14CWithComments = class(TCanonicalizationMethod)
+  public
+    constructor Create;
+  end;
+
+  TCanonicalizationExclusiveC14C = class(TCanonicalizationMethod)
+  public
+    constructor Create;
+  end;
+
+  TCanonicalizationExclusiveC14CWithComments = class(TCanonicalizationMethod)
+  public
+    constructor Create;
+  end;
+
+  TDigestMethod = class(TAlgorithm)
+  end;
+
+  TDigestMethodSHA1 = class(TDigestMethod)
+  public
+    constructor Create;
+  end;
+
+  TDigestMethodSHA256 = class(TDigestMethod)
+  public
+    constructor Create;
+  end;
+
+  TDigestMethodSHA384 = class(TDigestMethod)
+  public
+    constructor Create;
+  end;
+
+  TDigestMethodSHA512 = class(TDigestMethod)
+  public
+    constructor Create;
+  end;
+
+  TSignatureMethod = class(TAlgorithm)
+  end;
+
+  TSignatureMethodRSA_SHA1 = class(TSignatureMethod)
+  public
+    constructor Create;
+  end;
+
+  TSignatureMethodDSA_SHA1 = class(TSignatureMethod)
+  public
+    constructor Create;
+  end;
+
+  TSignatureMethodRSA_SHA256 = class(TSignatureMethod)
+  public
+    constructor Create;
+  end;
+
+  TSignatureMethodRSA_SHA384 = class(TSignatureMethod)
+  public
+    constructor Create;
+  end;
+
+  TSignatureMethodRSA_SHA512 = class(TSignatureMethod)
+  public
+    constructor Create;
+  end;
+
+  TSignatureMethodECDSA_SHA1 = class(TSignatureMethod)
+  public
+    constructor Create;
+  end;
+
+  TSignatureMethodECDSA_SHA256 = class(TSignatureMethod)
+  public
+    constructor Create;
+  end;
+
+  TSignatureMethodECDSA_SHA384 = class(TSignatureMethod)
+  public
+    constructor Create;
+  end;
+
+  TSignatureMethodECDSA_SHA512 = class(TSignatureMethod)
+  public
+    constructor Create;
+  end;
+
+  TSignatureMethodHMAC_SHA1 = class(TSignatureMethod)
+  public
+    constructor Create;
+  end;
+
+  TSignatureMethodHMAC_SHA256 = class(TSignatureMethod)
+  public
+    constructor Create;
+  end;
+
+  TSignatureMethodHMAC_SHA384 = class(TSignatureMethod)
+  public
+    constructor Create;
+  end;
+
+  TSignatureMethodHMAC_SHA512 = class(TSignatureMethod)
+  public
+    constructor Create;
   end;
 
   TSigner = class
   private
-    FSignature: Pointer;
+    FAlgorithms: TList<TAlgorithm>;
+    FCanonicalizationMethod: TCanonicalizationMethod;
+    FSignatureMethod: TSignatureMethod;
+    FTransforms: TArray<CRYPT_XML_ALGORITHM>;
+    FDigestMethod: TDigestMethod;
+
+    procedure AddAlgorithm(const Algorithm: TAlgorithm);
+    procedure SetCanonicalizationMethod(const Value: TCanonicalizationMethod);
+    procedure SetSignatureMethod(const Value: TSignatureMethod);
+    procedure SetDigestMethod(const Value: TDigestMethod);
   public
+    constructor Create;
+
+    destructor Destroy; override;
+
     function Sign(const Certificate: TCertificate; const SignaturePath, URI, XML: String): String;
+
+    procedure AddTransform(const Transform: TAlgorithm);
+
+    property CanonicalizationMethod: TCanonicalizationMethod read FCanonicalizationMethod write SetCanonicalizationMethod;
+    property DigestMethod: TDigestMethod read FDigestMethod write SetDigestMethod;
+    property SignatureMethod: TSignatureMethod read FSignatureMethod write SetSignatureMethod;
+    property Transforms: TArray<CRYPT_XML_ALGORITHM> read FTransforms;
   end;
 
 implementation
@@ -50,14 +195,15 @@ function CertGetCertificateChain(hChainEngine: HCERTCHAINENGINE; pCertContext: P
 function WriteXML(Callback: PPointer; Data: PByte; Size: Cardinal): HRESULT; stdcall;
 begin
   PString(Callback^)^ := PString(Callback^)^ + TEncoding.UTF8.GetString(TBytes(Data), 0, Size);
+  Result := S_OK;
 end;
 
 { TCertificate }
 
 destructor TCertificate.Destroy;
 begin
-  if Assigned(FCertificate) then
-    CertFreeCertificateContext(FCertificate);
+  if Assigned(FContext) then
+    CertFreeCertificateContext(FContext);
 
   if Assigned(FCertificateStore) then
     CertCloseStore(FCertificateStore, 0);
@@ -85,16 +231,16 @@ begin
   FCertificateStore := PFXImportCertStore(@Blob, PChar(Password), 0);
 
   if not Assigned(FCertificateStore) then
-    raise Exception.Create('Can''t load the certificate file!');
+    RaiseLastOSError;
 
-  FCertificate := CertFindCertificateInStore(FCertificateStore, X509_ASN_ENCODING, 0, CERT_FIND_HAS_PRIVATE_KEY, nil, nil);
+  FContext := CertFindCertificateInStore(FCertificateStore, X509_ASN_ENCODING, 0, CERT_FIND_HAS_PRIVATE_KEY, nil, nil);
 
-  if not Assigned(FCertificate) then
-    raise Exception.Create('A valid certificate doesn''t found!');
+  if not Assigned(FContext) then
+    RaiseLastOSError;
 
   var CallerFree: BOOL := FALSE;
 
-  if CryptAcquireCertificatePrivateKey(FCertificate, CRYPT_ACQUIRE_CACHE_FLAG, nil, FPrivateKey, @KeySpec, @CallerFree) = FALSE then
+  if CryptAcquireCertificatePrivateKey(FContext, CRYPT_ACQUIRE_CACHE_FLAG, nil, FPrivateKey, @KeySpec, @CallerFree) = FALSE then
     RaiseLastOSError;
 end;
 
@@ -111,38 +257,232 @@ begin
   end;
 end;
 
-{ TCertificateChain }
+{ TAlgorithm }
 
-destructor TCertificateChain.Destroy;
+constructor TAlgorithm.Create(const Algorithm: String);
 begin
-  if Assigned(FChain) then
-    CertFreeCertificateChain(FChain);
+  inherited Create;
 
-  inherited;
+  FAlgorithm.cbSize := SizeOf(FAlgorithm);
+  FAlgorithm.Encoded.dwCharset := CRYPT_XML_CHARSET_AUTO;
+  FAlgorithm.wszAlgorithm := PChar(Algorithm);
 end;
 
-procedure TCertificateChain.Load(const Certificate: TCertificate);
+{ TCanonicalizationC14C }
+
+constructor TCanonicalizationC14C.Create;
 begin
-  var Params: CERT_CHAIN_PARA;
+  inherited Create(wszURI_CANONICALIZATION_C14N);
+end;
 
-  FillChar(Params, SizeOf(Params), 0);
+{ TCanonicalizationC14CWithComments }
 
-  if CertGetCertificateChain(0, Certificate.Certificate, nil, nil, @Params, 0, nil, FChain) = FALSE then
-    RaiseLastOSError;
+constructor TCanonicalizationC14CWithComments.Create;
+begin
+  inherited Create(wszURI_CANONICALIZATION_C14NC);
+end;
+
+{ TCanonicalizationExclusiveC14C }
+
+constructor TCanonicalizationExclusiveC14C.Create;
+begin
+  inherited Create(wszURI_CANONICALIZATION_EXSLUSIVE_C14N);
+end;
+
+{ TCanonicalizationExclusiveC14CWithComments }
+
+constructor TCanonicalizationExclusiveC14CWithComments.Create;
+begin
+  inherited Create(wszURI_CANONICALIZATION_EXSLUSIVE_C14NC);
+end;
+
+{ TDigestMethodSHA1 }
+
+constructor TDigestMethodSHA1.Create;
+begin
+  inherited Create(wszURI_XMLNS_DIGSIG_SHA1);
+end;
+
+{ TDigestMethodSHA256 }
+
+constructor TDigestMethodSHA256.Create;
+begin
+  inherited Create(wszURI_XMLNS_DIGSIG_SHA256);
+end;
+
+{ TDigestMethodSHA384 }
+
+constructor TDigestMethodSHA384.Create;
+begin
+  inherited Create(wszURI_XMLNS_DIGSIG_SHA384);
+end;
+
+{ TDigestMethodSHA512 }
+
+constructor TDigestMethodSHA512.Create;
+begin
+  inherited Create(wszURI_XMLNS_DIGSIG_SHA512);
+end;
+
+{ TSignatureMethodRSA_SHA1 }
+
+constructor TSignatureMethodRSA_SHA1.Create;
+begin
+  inherited Create(wszURI_XMLNS_DIGSIG_RSA_SHA1);
+end;
+
+{ TSignatureMethodDSA_SHA1 }
+
+constructor TSignatureMethodDSA_SHA1.Create;
+begin
+  inherited Create(wszURI_XMLNS_DIGSIG_DSA_SHA1);
+end;
+
+{ TSignatureMethodRSA_SHA256 }
+
+constructor TSignatureMethodRSA_SHA256.Create;
+begin
+  inherited Create(wszURI_XMLNS_DIGSIG_RSA_SHA256);
+end;
+
+{ TSignatureMethodRSA_SHA384 }
+
+constructor TSignatureMethodRSA_SHA384.Create;
+begin
+  inherited Create(wszURI_XMLNS_DIGSIG_RSA_SHA384);
+end;
+
+{ TSignatureMethodRSA_SHA512 }
+
+constructor TSignatureMethodRSA_SHA512.Create;
+begin
+  inherited Create(wszURI_XMLNS_DIGSIG_RSA_SHA512);
+end;
+
+{ TSignatureMethodECDSA_SHA1 }
+
+constructor TSignatureMethodECDSA_SHA1.Create;
+begin
+  inherited Create(wszURI_XMLNS_DIGSIG_ECDSA_SHA1);
+end;
+
+{ TSignatureMethodECDSA_SHA256 }
+
+constructor TSignatureMethodECDSA_SHA256.Create;
+begin
+  inherited Create(wszURI_XMLNS_DIGSIG_ECDSA_SHA256);
+end;
+
+{ TSignatureMethodECDSA_SHA384 }
+
+constructor TSignatureMethodECDSA_SHA384.Create;
+begin
+  inherited Create(wszURI_XMLNS_DIGSIG_ECDSA_SHA384);
+end;
+
+{ TSignatureMethodECDSA_SHA512 }
+
+constructor TSignatureMethodECDSA_SHA512.Create;
+begin
+  inherited Create(wszURI_XMLNS_DIGSIG_ECDSA_SHA512);
+end;
+
+{ TSignatureMethodHMAC_SHA1 }
+
+constructor TSignatureMethodHMAC_SHA1.Create;
+begin
+  inherited Create(wszURI_XMLNS_DIGSIG_HMAC_SHA1);
+end;
+
+{ TSignatureMethodHMAC_SHA256 }
+
+constructor TSignatureMethodHMAC_SHA256.Create;
+begin
+  inherited Create(wszURI_XMLNS_DIGSIG_HMAC_SHA256);
+end;
+
+{ TSignatureMethodHMAC_SHA384 }
+
+constructor TSignatureMethodHMAC_SHA384.Create;
+begin
+  inherited Create(wszURI_XMLNS_DIGSIG_HMAC_SHA384);
+end;
+
+{ TSignatureMethodHMAC_SHA512 }
+
+constructor TSignatureMethodHMAC_SHA512.Create;
+begin
+  inherited Create(wszURI_XMLNS_DIGSIG_HMAC_SHA512);
+end;
+
+{ TTransformBase64 }
+
+constructor TTransformBase64.Create;
+begin
+  inherited Create(wszURI_XMLNS_TRANSFORM_BASE64);
+end;
+
+{ TTransformEveloped }
+
+constructor TTransformEveloped.Create;
+begin
+  inherited Create(wszURI_XMLNS_TRANSFORM_ENVELOPED);
 end;
 
 { TSigner }
 
-function TSigner.Sign(const Certificate: TCertificate; const SignaturePath, URI, XML: String): String;
+procedure TSigner.AddAlgorithm(const Algorithm: TAlgorithm);
+begin
+  FAlgorithms.Add(Algorithm);
+end;
 
-  function CreateAlgorithm(const NameSpace: String): CRYPT_XML_ALGORITHM;
-  begin
-    Result.cbSize := SizeOf(Result);
-    Result.Encoded.cbData := 0;
-    Result.Encoded.dwCharset := CRYPT_XML_CHARSET_AUTO;
-    Result.Encoded.pbData := nil;
-    Result.wszAlgorithm := PChar(NameSpace);
-  end;
+procedure TSigner.AddTransform(const Transform: TAlgorithm);
+begin
+  AddAlgorithm(Transform);
+
+  FTransforms := FTransforms + [Transform.Algorithm];
+end;
+
+constructor TSigner.Create;
+begin
+  inherited;
+
+  FAlgorithms := TObjectList<TAlgorithm>.Create;
+
+  CanonicalizationMethod := TCanonicalizationC14C.Create;
+  DigestMethod := TDigestMethodSHA256.Create;
+  SignatureMethod := TSignatureMethodRSA_SHA256.Create;
+end;
+
+destructor TSigner.Destroy;
+begin
+  FAlgorithms.Free;
+
+  inherited;
+end;
+
+procedure TSigner.SetCanonicalizationMethod(const Value: TCanonicalizationMethod);
+begin
+  FCanonicalizationMethod := Value;
+
+  AddAlgorithm(Value);
+end;
+
+procedure TSigner.SetDigestMethod(const Value: TDigestMethod);
+begin
+  FDigestMethod := Value;
+
+  AddAlgorithm(Value);
+end;
+
+procedure TSigner.SetSignatureMethod(const Value: TSignatureMethod);
+begin
+  FSignatureMethod := Value;
+
+  AddAlgorithm(Value);
+end;
+
+function TSigner.Sign(const Certificate: TCertificate; const SignaturePath, URI, XML: String): String;
 
   procedure CheckReturn(const Value: HRESULT);
   begin
@@ -150,27 +490,30 @@ function TSigner.Sign(const Certificate: TCertificate; const SignaturePath, URI,
       RaiseLastOSError;
   end;
 
+  function GetTransforms: PCRYPT_XML_ALGORITHM;
+  begin
+    if Assigned(FTransforms) then
+      Result := @Transforms[0]
+    else
+      Result := nil;
+  end;
+
 begin
-  var CanonicalizationMethod := CreateAlgorithm(wszURI_CANONICALIZATION_C14N);
   var CertificateBlob: CERT_BLOB;
-  var Chain := TCertificateChain.Create;
-  var DigestMethod := CreateAlgorithm(wszURI_XMLNS_DIGSIG_SHA1);
   var EncodedXML: CRYPT_XML_BLOB;
   var KeyInfo: CRYPT_XML_KEYINFO_PARAM;
   var Path := PChar(SignaturePath);
   var Properties: CRYPT_XML_PROPERTY;
   var ReferenceValue: Pointer := nil;
+  Result := EmptyStr;
   var SelfValue: Pointer := @Result;
-  var SignatureMethod := CreateAlgorithm(wszURI_XMLNS_DIGSIG_RSA_SHA1);
-  var Transforms := [CreateAlgorithm(wszURI_CANONICALIZATION_C14N), CreateAlgorithm(wszURI_XMLNS_TRANSFORM_ENVELOPED)];
+  var Signature: Pointer := nil;
   var ValueTrue: BOOL := TRUE;
   var XMLConverted := TEncoding.UTF8.GetBytes(XML);
 
   Properties.dwPropId := CRYPT_XML_PROPERTY_SIGNATURE_LOCATION;
   Properties.cbValue := SizeOf(LPCWSTR);
   Properties.pvValue := @Path;
-
-  Chain.Load(Certificate);
 
   EncodedXML.cbData := Length(XMLConverted);
   EncodedXML.dwCharset := CRYPT_XML_CHARSET_UTF8;
@@ -181,20 +524,24 @@ begin
   KeyInfo.cCertificate := 1;
   KeyInfo.rgCertificate := @CertificateBlob;
 
-  CertificateBlob.cbData := Certificate.Certificate.cbCertEncoded;
-  CertificateBlob.pbData := Certificate.Certificate.pbCertEncoded;
+  CertificateBlob.cbData := Certificate.Context.cbCertEncoded;
+  CertificateBlob.pbData := Certificate.Context.pbCertEncoded;
 
-  CheckReturn(CryptXmlOpenToEncode(nil, 0, nil, @Properties, 1, @EncodedXML, FSignature));
+  CheckReturn(CryptXmlOpenToEncode(nil, 0, nil, @Properties, 1, @EncodedXML, Signature));
 
-  CheckReturn(CryptXmlCreateReference(FSignature, 0, nil, PChar(URI), nil, @DigestMethod, 2, @Transforms[0], ReferenceValue));
+  try
+    CheckReturn(CryptXmlCreateReference(Signature, 0, nil, PChar(URI), nil, @DigestMethod.Algorithm, Length(FTransforms), GetTransforms, ReferenceValue));
 
-  CheckReturn(CryptXmlSign(FSignature, Certificate.PrivateKey, Certificate.KeySpec, 0, CRYPT_XML_KEYINFO_SPEC_PARAM, @KeyInfo, @SignatureMethod, @CanonicalizationMethod));
+    CheckReturn(CryptXmlSign(Signature, Certificate.PrivateKey, Certificate.KeySpec, 0, CRYPT_XML_KEYINFO_SPEC_PARAM, @KeyInfo, @SignatureMethod.Algorithm, @CanonicalizationMethod.Algorithm));
 
-  Properties.dwPropId := CRYPT_XML_PROPERTY_DOC_DECLARATION;
-  Properties.cbValue := SizeOf(ValueTrue);
-  Properties.pvValue := @ValueTrue;
+    Properties.dwPropId := CRYPT_XML_PROPERTY_DOC_DECLARATION;
+    Properties.cbValue := SizeOf(ValueTrue);
+    Properties.pvValue := @ValueTrue;
 
-  CheckReturn(CryptXmlEncode(FSignature, CRYPT_XML_CHARSET_UTF8, @Properties, 1, SelfValue, WriteXML));
+    CheckReturn(CryptXmlEncode(Signature, CRYPT_XML_CHARSET_UTF8, @Properties, 1, SelfValue, WriteXML));
+  finally
+    CryptXmlClose(Signature);
+  end;
 end;
 
 end.
