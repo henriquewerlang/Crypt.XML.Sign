@@ -159,6 +159,13 @@ type
     constructor Create;
   end;
 
+  TSignature = record
+  public
+    DigestValue: String;
+    SignatureValue: String;
+    X509Certificate: String;
+  end;
+
   TSigner = class
   private
     FAlgorithms: TList<TAlgorithm>;
@@ -167,7 +174,10 @@ type
     FTransforms: TArray<CRYPT_XML_ALGORITHM>;
     FDigestMethod: TDigestMethod;
 
+    function DoSign(const Certificate: TCertificate; const SignaturePath, URI, XML: String): Pointer;
+
     procedure AddAlgorithm(const Algorithm: TAlgorithm);
+    procedure CheckReturn(const Value: HRESULT);
     procedure SetCanonicalizationMethod(const Value: TCanonicalizationMethod);
     procedure SetSignatureMethod(const Value: TSignatureMethod);
     procedure SetDigestMethod(const Value: TDigestMethod);
@@ -176,7 +186,8 @@ type
 
     destructor Destroy; override;
 
-    function Sign(const Certificate: TCertificate; const SignaturePath, URI, XML: String): String;
+    function Sign(const Certificate: TCertificate; const SignaturePath, URI, XML: String): TSignature;
+    function SignXML(const Certificate: TCertificate; const SignaturePath, URI, XML: String): String;
 
     procedure AddTransform(const Transform: TAlgorithm);
 
@@ -188,15 +199,19 @@ type
 
 implementation
 
-uses System.IOUtils;
+uses System.NetEncoding;
 
 function CertGetCertificateChain(hChainEngine: HCERTCHAINENGINE; pCertContext: PCERT_CONTEXT; pTime: PFILETIME; hAdditionalStore: HCERTSTORE; pChainPara: PCERT_CHAIN_PARA; dwFlags: Cardinal; pvReserved: PPointer; out ppChainContext: PCERT_CHAIN_CONTEXT): BOOL; stdcall; external 'CRYPT32.dll' name 'CertGetCertificateChain';
+function CryptXmlGetSignature(hCryptXml: Pointer; out ppStruct: PCRYPT_XML_SIGNATURE): HRESULT; stdcall; external 'CRYPTXML.dll' name 'CryptXmlGetSignature';
 
 function WriteXML(Callback: PPointer; Data: PByte; Size: Cardinal): HRESULT; stdcall;
 begin
   PString(Callback^)^ := PString(Callback^)^ + TEncoding.UTF8.GetString(TBytes(Data), 0, Size);
   Result := S_OK;
 end;
+
+type
+  PPCRYPT_XML_REFERENCE = ^PCRYPT_XML_REFERENCE;
 
 { TCertificate }
 
@@ -443,6 +458,12 @@ begin
   FTransforms := FTransforms + [Transform.Algorithm];
 end;
 
+procedure TSigner.CheckReturn(const Value: HRESULT);
+begin
+  if Value <> S_OK then
+    RaiseLastOSError;
+end;
+
 constructor TSigner.Create;
 begin
   inherited;
@@ -459,6 +480,49 @@ begin
   FAlgorithms.Free;
 
   inherited;
+end;
+
+function TSigner.DoSign(const Certificate: TCertificate; const SignaturePath, URI, XML: String): Pointer;
+
+  function GetTransforms: PCRYPT_XML_ALGORITHM;
+  begin
+    if Assigned(FTransforms) then
+      Result := @Transforms[0]
+    else
+      Result := nil;
+  end;
+
+begin
+  var CertificateBlob: CERT_BLOB;
+  var EncodedXML: CRYPT_XML_BLOB;
+  var KeyInfo: CRYPT_XML_KEYINFO_PARAM;
+  var Path := PChar(SignaturePath);
+  var Properties: CRYPT_XML_PROPERTY;
+  var ReferenceValue: Pointer := nil;
+  Result := nil;
+  var XMLConverted := TEncoding.UTF8.GetBytes(XML);
+
+  Properties.dwPropId := CRYPT_XML_PROPERTY_SIGNATURE_LOCATION;
+  Properties.cbValue := SizeOf(LPCWSTR);
+  Properties.pvValue := @Path;
+
+  EncodedXML.cbData := Length(XMLConverted);
+  EncodedXML.dwCharset := CRYPT_XML_CHARSET_UTF8;
+  EncodedXML.pbData := @XMLConverted[0];
+
+  FillChar(KeyInfo, SizeOf(KeyInfo), 0);
+
+  KeyInfo.cCertificate := 1;
+  KeyInfo.rgCertificate := @CertificateBlob;
+
+  CertificateBlob.cbData := Certificate.Context.cbCertEncoded;
+  CertificateBlob.pbData := Certificate.Context.pbCertEncoded;
+
+  CheckReturn(CryptXmlOpenToEncode(nil, 0, nil, @Properties, 1, @EncodedXML, Result));
+
+  CheckReturn(CryptXmlCreateReference(Result, 0, nil, PChar(URI), nil, @DigestMethod.Algorithm, Length(FTransforms), GetTransforms, ReferenceValue));
+
+  CheckReturn(CryptXmlSign(Result, Certificate.PrivateKey, Certificate.KeySpec, 0, CRYPT_XML_KEYINFO_SPEC_PARAM, @KeyInfo, @SignatureMethod.Algorithm, @CanonicalizationMethod.Algorithm));
 end;
 
 procedure TSigner.SetCanonicalizationMethod(const Value: TCanonicalizationMethod);
@@ -482,63 +546,47 @@ begin
   AddAlgorithm(Value);
 end;
 
-function TSigner.Sign(const Certificate: TCertificate; const SignaturePath, URI, XML: String): String;
+function TSigner.Sign(const Certificate: TCertificate; const SignaturePath, URI, XML: String): TSignature;
 
-  procedure CheckReturn(const Value: HRESULT);
+  function ConvertToBytes(const Blob: CRYPT_INTEGER_BLOB): TBytes; overload;
   begin
-    if Value <> S_OK then
-      RaiseLastOSError;
+    SetLength(Result, Blob.cbData);
+
+    Move(Blob.pbData^, Result[0], Blob.cbData);
   end;
 
-  function GetTransforms: PCRYPT_XML_ALGORITHM;
+  function ConvertToBytes(const Blob: CRYPT_XML_DATA_BLOB): TBytes; overload;
   begin
-    if Assigned(FTransforms) then
-      Result := @Transforms[0]
-    else
-      Result := nil;
+    SetLength(Result, Blob.cbData);
+
+    Move(Blob.pbData^, Result[0], Blob.cbData);
   end;
 
 begin
-  var CertificateBlob: CERT_BLOB;
-  var EncodedXML: CRYPT_XML_BLOB;
-  var KeyInfo: CRYPT_XML_KEYINFO_PARAM;
-  var Path := PChar(SignaturePath);
+  var Signature := DoSign(Certificate, SignaturePath, URI, XML);
+  var SignatureInfo: PCRYPT_XML_SIGNATURE;
+
+  CheckReturn(CryptXmlGetSignature(Signature, SignatureInfo));
+
+  Result.DigestValue := TNetEncoding.Base64String.EncodeBytesToString(ConvertToBytes(PPCRYPT_XML_REFERENCE(SignatureInfo.SignedInfo.rgpReference)^.DigestValue));
+  Result.SignatureValue := TNetEncoding.Base64String.EncodeBytesToString(ConvertToBytes(SignatureInfo.SignatureValue));
+  Result.X509Certificate := TNetEncoding.Base64String.EncodeBytesToString(ConvertToBytes(SignatureInfo.pKeyInfo.rgKeyInfo.Anonymous.X509Data.rgX509Data.Anonymous.Certificate));
+end;
+
+function TSigner.SignXML(const Certificate: TCertificate; const SignaturePath, URI, XML: String): String;
+begin
   var Properties: CRYPT_XML_PROPERTY;
-  var ReferenceValue: Pointer := nil;
-  Result := EmptyStr;
-  var SelfValue: Pointer := @Result;
-  var Signature: Pointer := nil;
+  var ReturnValue := @Result;
   var ValueTrue: BOOL := TRUE;
-  var XMLConverted := TEncoding.UTF8.GetBytes(XML);
 
-  Properties.dwPropId := CRYPT_XML_PROPERTY_SIGNATURE_LOCATION;
-  Properties.cbValue := SizeOf(LPCWSTR);
-  Properties.pvValue := @Path;
-
-  EncodedXML.cbData := Length(XMLConverted);
-  EncodedXML.dwCharset := CRYPT_XML_CHARSET_UTF8;
-  EncodedXML.pbData := @XMLConverted[0];
-
-  FillChar(KeyInfo, SizeOf(KeyInfo), 0);
-
-  KeyInfo.cCertificate := 1;
-  KeyInfo.rgCertificate := @CertificateBlob;
-
-  CertificateBlob.cbData := Certificate.Context.cbCertEncoded;
-  CertificateBlob.pbData := Certificate.Context.pbCertEncoded;
-
-  CheckReturn(CryptXmlOpenToEncode(nil, 0, nil, @Properties, 1, @EncodedXML, Signature));
+  var Signature := DoSign(Certificate, SignaturePath, URI, XML);
 
   try
-    CheckReturn(CryptXmlCreateReference(Signature, 0, nil, PChar(URI), nil, @DigestMethod.Algorithm, Length(FTransforms), GetTransforms, ReferenceValue));
-
-    CheckReturn(CryptXmlSign(Signature, Certificate.PrivateKey, Certificate.KeySpec, 0, CRYPT_XML_KEYINFO_SPEC_PARAM, @KeyInfo, @SignatureMethod.Algorithm, @CanonicalizationMethod.Algorithm));
-
     Properties.dwPropId := CRYPT_XML_PROPERTY_DOC_DECLARATION;
     Properties.cbValue := SizeOf(ValueTrue);
     Properties.pvValue := @ValueTrue;
 
-    CheckReturn(CryptXmlEncode(Signature, CRYPT_XML_CHARSET_UTF8, @Properties, 1, SelfValue, WriteXML));
+    CheckReturn(CryptXmlEncode(Signature, CRYPT_XML_CHARSET_UTF8, @Properties, 1, ReturnValue, WriteXML));
   finally
     CryptXmlClose(Signature);
   end;

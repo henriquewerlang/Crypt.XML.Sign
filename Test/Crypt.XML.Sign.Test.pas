@@ -103,6 +103,8 @@ type
     procedure WhenFillTheSignatureMethodMustSignTheXMLWithTheMethodLoaded;
     [Test]
     procedure WhenAddATransformAlgorithmMustLoadThisInfoInTheXMLSigned;
+    [Test]
+    procedure WhenSignAXMLMustLoadTheSignatureInfoWithTheValuesOfTheSignature;
   end;
 
 implementation
@@ -161,7 +163,7 @@ function TSignerTest.SignXML: IXMLNode;
 begin
   var XML: IXMLDocument := TXMLDocument.Create(nil);
 
-  XML.LoadFromXML(FSigner.Sign(FCertificate, '/XML', '#Sign', '<XML><Value Id="Sign">ABC</Value></XML>'));
+  XML.LoadFromXML(FSigner.SignXML(FCertificate, '/XML', '#SignXML', '<XML><Value Id="SignXML">ABC</Value></XML>'));
 
   Result := XML.ChildNodes.Last;
 end;
@@ -213,7 +215,26 @@ end;
 
 procedure TSignerTest.WhenSignAXMLMustExecuteWithoutErrors;
 begin
-  FSigner.Sign(FCertificate, '/XML', '#Sign', '<XML><Value Id="Sign">ABC</Value></XML>');
+  FSigner.SignXML(FCertificate, '/XML', '#SignXML', '<XML><Value Id="SignXML">ABC</Value></XML>');
+end;
+
+procedure TSignerTest.WhenSignAXMLMustLoadTheSignatureInfoWithTheValuesOfTheSignature;
+begin
+  var SignatureInfo := FSigner.Sign(FCertificate, '/XML', '#SignXML', '<XML><Value Id="SignXML">ABC</Value></XML>');
+
+  Assert.IsNotEmpty(SignatureInfo.SignatureValue);
+
+  Assert.AreEqual(
+    'MIIDLjCCAhqgAwIBAgIQtQ/bA4dLHpxP4jq9bLqusjAJBgUrDgMCHQUAMB8xHTAbBgNVBAMTFENvbnRvc28gaW50ZXJtZWRpYXRlMB4XDTI0MDkwOTE3NDM0OVoXDTM5MTIzMTIzNTk1OV' +
+    'owEjEQMA4GA1UEAxMHQ29udG9zbzCCASIwDQYJKoZIhvcNAQEBBQADggEPADCCAQoCggEBAOCAu+BG8UFri1U5mwb6eLYIKzqOoipFXgxHjg8HLeJgtrLZqkhzPS0Tv1j2/MTkG4ILtj5f' +
+    'u4A/1BW+KXxWUt2raE5GUVl4hig2ThUIxbCMrcvImJeb3LDXcIXLCVhe7yWGFbzvROz6e1mMUxe4P9lwot7Ey1SeoI38v4jO1EYEjLb8hac8XHGEZ8eI+MK7+GZrdUfSSl11UaRwpnZzN/' +
+    '8bxCoi+frOZ8j+bpGtSthLbf6Q7+oAFpo8gUQvDPcJfX3WUflmABiSTzDaSO6L3I1yxM2gaM1vUqt/cpMA53of/5HRmGvEaSSyaT4FUM/YLOUVxbxAzc01NCUcHelQm3kCAwEAAaN7MHkw' +
+    'DAYDVR0TAQH/BAIwADAVBgNVHSUEDjAMBgorBgEEAYI3CgMMMFIGA1UdAQRLMEmAEAEgBgdchfZw2HS80kZ0ri6hIzAhMR8wHQYDVQQDExZDb250b3NvIFJvb3QgQXV0aG9yaXR5ghAzZm' +
+    '8oEJLKnkdJApqE5DdIMAkGBSsOAwIdBQADggEBAJQkBFrgNEDnIR7LGTbM0DVKVJgG8cS4cf7TESJIBohn8BheEHKf0ghx4F11cl5sG2F2lq6/iF06z7uToi5V8E1a51l0vPctyBSgE2Vs' +
+    'SbdzZj1OGeFaCwDhnnn7TuPa2sRT4JdYk20G4T/rhegY/QVTsgkBcJiDMKhyNbbdvTDOK05/tNZZds5Zu9kZnpn3qCfDw2eLqm1rBblmDbZxcfBNaZtl8X4aALNggd5rvcQWsex7vfDJ0C' +
+    'yJZ595cphLVNCEQp9tjhUbW1Fv4MOnQ/ltPj7n7VjO+hPiEl3C4VGgHSXZ+bQKMPaktb0MiiLDG43ktgHfaXqFpB0Lbvu6Kiw=', SignatureInfo.X509Certificate);
+
+  Assert.AreEqual('ORjDlIhaZHQECNlbguge8kQ6nOOlL5jJbMwmz+vDZqg=', SignatureInfo.DigestValue);
 end;
 
 { TCanonicalizationMethodTest }
