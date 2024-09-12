@@ -1,4 +1,4 @@
-﻿unit XML.Signer.Test;
+﻿unit Crypt.XML.Sign.Test;
 
 interface
 
@@ -19,7 +19,7 @@ type
 
 implementation
 
-uses System.IOUtils, XML.Signer;
+uses System.IOUtils, Crypt.XML.Sign;
 
 { TSignerTest }
 
@@ -30,7 +30,7 @@ begin
 
   Certificate.Load('..\..\Certificate\Contoso.pfx', '123');
 
-  Signer.Sign(Certificate, '/nfeProc/NFe/Signature', TFile.ReadAllText('C:\Componentes\Windows-classic-samples\Samples\Win7Samples\security\cryptoapi\cryptxml\XML.xml'));
+//  Signer.Sign(Certificate, '/nfeProc/NFe/Signature', TFile.ReadAllText('C:\Componentes\Windows-classic-samples\Samples\Win7Samples\security\cryptoapi\cryptxml\XML.xml'));
 end;
 
 end.

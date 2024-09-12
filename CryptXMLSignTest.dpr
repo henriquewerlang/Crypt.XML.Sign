@@ -1,11 +1,11 @@
-﻿program XMLSignerTest;
+﻿program CryptXMLSignTest;
 
 {$STRONGLINKTYPES ON}
 
 uses
   Test.Insight.Framework,
-  XML.Signer.Test in 'Test\XML.Signer.Test.pas',
-  XML.Signer in 'XML.Signer.pas';
+  Crypt.XML.Sign.Test in 'Test\Crypt.XML.Sign.Test.pas',
+  Crypt.XML.Sign in 'Crypt.XML.Sign.pas';
 
 begin
   ReportMemoryLeaksOnShutdown := True;

@@ -1,8 +1,8 @@
-﻿unit XML.Signer;
+﻿unit Crypt.XML.Sign;
 
 interface
 
-uses System.SysUtils, Winapi.Windows, Windows.Foundation, Windows.Security.Cryptography;
+uses System.Classes, System.SysUtils, Winapi.Windows, Windows.Foundation, Windows.Security.Cryptography;
 
 type
   TCertificate = class
@@ -16,6 +16,7 @@ type
 
     procedure Load(const Certificate: TBytes; const Password: String); overload;
     procedure Load(const FileName, Password: String); overload;
+    procedure Load(const Stream: TStream; const Password: String); overload;
 
     property Certificate: PCERT_CONTEXT read FCertificate;
     property KeySpec: CERT_KEY_SPEC read FKeySpec;
@@ -51,7 +52,6 @@ begin
   PString(Callback^)^ := PString(Callback^)^ + TEncoding.UTF8.GetString(TBytes(Data), 0, Size);
 end;
 
-
 { TCertificate }
 
 destructor TCertificate.Destroy;
@@ -67,7 +67,13 @@ end;
 
 procedure TCertificate.Load(const FileName, Password: String);
 begin
-  Load(TFile.ReadAllBytes(FileName), Password);
+  var Stream := TFileStream.Create(FileName, fmOpenRead);
+
+  try
+    Load(Stream, Password);
+  finally
+    Stream.Free;
+  end;
 end;
 
 procedure TCertificate.Load(const Certificate: TBytes; const Password: String);
@@ -90,6 +96,19 @@ begin
 
   if CryptAcquireCertificatePrivateKey(FCertificate, CRYPT_ACQUIRE_CACHE_FLAG, nil, FPrivateKey, @KeySpec, @CallerFree) = FALSE then
     RaiseLastOSError;
+end;
+
+procedure TCertificate.Load(const Stream: TStream; const Password: String);
+begin
+  var ByteStream := TBytesStream.Create;
+
+  try
+    ByteStream.CopyFrom(Stream);
+
+    Load(ByteStream.Bytes, Password);
+  finally
+    ByteStream.Free;
+  end;
 end;
 
 { TCertificateChain }
@@ -132,7 +151,7 @@ function TSigner.Sign(const Certificate: TCertificate; const SignaturePath, URI,
   end;
 
 begin
-  var CanonicalizationMethod := CreateAlgorithm(wszURI_CANONICALIZATION_EXSLUSIVE_C14N);
+  var CanonicalizationMethod := CreateAlgorithm(wszURI_CANONICALIZATION_C14N);
   var CertificateBlob: CERT_BLOB;
   var Chain := TCertificateChain.Create;
   var DigestMethod := CreateAlgorithm(wszURI_XMLNS_DIGSIG_SHA1);
@@ -143,6 +162,7 @@ begin
   var ReferenceValue: Pointer := nil;
   var SelfValue: Pointer := @Result;
   var SignatureMethod := CreateAlgorithm(wszURI_XMLNS_DIGSIG_RSA_SHA1);
+  var Transforms := [CreateAlgorithm(wszURI_CANONICALIZATION_C14N), CreateAlgorithm(wszURI_XMLNS_TRANSFORM_ENVELOPED)];
   var ValueTrue: BOOL := TRUE;
   var XMLConverted := TEncoding.UTF8.GetBytes(XML);
 
@@ -166,7 +186,7 @@ begin
 
   CheckReturn(CryptXmlOpenToEncode(nil, 0, nil, @Properties, 1, @EncodedXML, FSignature));
 
-  CheckReturn(CryptXmlCreateReference(FSignature, 0, nil, PChar(URI), nil, @DigestMethod, 0, nil, ReferenceValue));
+  CheckReturn(CryptXmlCreateReference(FSignature, 0, nil, PChar(URI), nil, @DigestMethod, 2, @Transforms[0], ReferenceValue));
 
   CheckReturn(CryptXmlSign(FSignature, Certificate.PrivateKey, Certificate.KeySpec, 0, CRYPT_XML_KEYINFO_SPEC_PARAM, @KeyInfo, @SignatureMethod, @CanonicalizationMethod));
 
