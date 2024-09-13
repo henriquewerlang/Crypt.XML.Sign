@@ -201,7 +201,6 @@ implementation
 
 uses System.NetEncoding;
 
-function CertGetCertificateChain(hChainEngine: HCERTCHAINENGINE; pCertContext: PCERT_CONTEXT; pTime: PFILETIME; hAdditionalStore: HCERTSTORE; pChainPara: PCERT_CHAIN_PARA; dwFlags: Cardinal; pvReserved: PPointer; out ppChainContext: PCERT_CHAIN_CONTEXT): BOOL; stdcall; external 'CRYPT32.dll' name 'CertGetCertificateChain';
 function CryptXmlGetSignature(hCryptXml: Pointer; out ppStruct: PCRYPT_XML_SIGNATURE): HRESULT; stdcall; external 'CRYPTXML.dll' name 'CryptXmlGetSignature';
 
 function WriteXML(Callback: PPointer; Data: PByte; Size: Cardinal): HRESULT; stdcall;
