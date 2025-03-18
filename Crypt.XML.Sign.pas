@@ -459,8 +459,8 @@ end;
 
 procedure TSigner.CheckReturn(const Value: HRESULT);
 begin
-  if Value <> S_OK then
-    RaiseLastOSError;
+  if Failed(Value) then
+    RaiseLastOSError(Value);
 end;
 
 constructor TSigner.Create;
