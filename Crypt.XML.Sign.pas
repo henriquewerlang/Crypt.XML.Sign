@@ -227,7 +227,7 @@ end;
 
 procedure TCertificate.Load(const FileName, Password: String);
 begin
-  var Stream := TFileStream.Create(FileName, fmOpenRead);
+  var Stream := TFileStream.Create(FileName, fmOpenRead + fmShareDenyWrite);
 
   try
     Load(Stream, Password);
