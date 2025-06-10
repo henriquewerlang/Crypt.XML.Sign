@@ -11,6 +11,9 @@ type
     FCertificateStore: HCERTSTORE;
     FKeySpec: CERT_KEY_SPEC;
     FPrivateKey: HCRYPTPROV_OR_NCRYPT_KEY_HANDLE;
+    FExpiry: TDateTime;
+    FStart: TDateTime;
+    FSerialNumber: String;
   public
     destructor Destroy; override;
 
@@ -19,8 +22,11 @@ type
     procedure Load(const Stream: TStream; const Password: String); overload;
 
     property Context: PCERT_CONTEXT read FContext;
+    property Expiry: TDateTime read FExpiry;
     property KeySpec: CERT_KEY_SPEC read FKeySpec;
     property PrivateKey: HCRYPTPROV_OR_NCRYPT_KEY_HANDLE read FPrivateKey;
+    property Start: TDateTime read FStart;
+    property SerialNumber: String read FSerialNumber;
   end;
 
   TAlgorithm = class
@@ -237,6 +243,30 @@ begin
 end;
 
 procedure TCertificate.Load(const Certificate: TBytes; const Password: String);
+
+  function ConvertDate(const Date: FILETIME): TDateTime;
+  var
+    DateInfo: TFileTime absolute Date;
+    SystemDateInfo: TSystemTime;
+
+  begin
+    Result := 0;
+
+    if FileTimeToSystemTime(DateInfo, SystemDateInfo) then
+      Result := SystemTimeToDateTime(SystemDateInfo);
+  end;
+
+  procedure LoadSerialNumber;
+  begin
+    var Number := Context.pCertInfo^.SerialNumber;
+
+    SetLength(FSerialNumber, Number.cbData * 2);
+
+    BinToHex(Number.pbData, PChar(FSerialNumber), Context.pCertInfo^.SerialNumber.cbData);
+
+    FSerialNumber := SwapHexEndianness(FSerialNumber);
+  end;
+
 begin
   var Blob: CRYPT_INTEGER_BLOB;
   Blob.cbData := Length(Certificate);
@@ -256,6 +286,11 @@ begin
 
   if CryptAcquireCertificatePrivateKey(FContext, CRYPT_ACQUIRE_CACHE_FLAG, nil, FPrivateKey, @KeySpec, @CallerFree) = FALSE then
     RaiseLastOSError;
+
+  FExpiry := ConvertDate(FContext.pCertInfo^.NotAfter);
+  FStart := ConvertDate(FContext.pCertInfo^.NotBefore);
+
+  LoadSerialNumber;
 end;
 
 procedure TCertificate.Load(const Stream: TStream; const Password: String);

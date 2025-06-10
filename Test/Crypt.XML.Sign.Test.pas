@@ -7,11 +7,23 @@ uses Test.Insight.Framework, Crypt.XML.Sign, Xml.XMLDoc, Xml.XMLIntf;
 type
   [TestFixture]
   TCertificateTest = class
+  private
+    FCertificate: TCertificate;
   public
+    [Setup]
+    procedure Setup;
+    [TearDown]
+    procedure TearDown;
     [Test]
     procedure WhenLoadTheCertificateMustLoadTheContext;
     [Test]
     procedure WhenLoadTheCertificateMustLoadThePrivateKeyHandle;
+    [Test]
+    procedure WhenLoadTheCertificateMustLoadTheCertificateSerialNumber;
+    [Test]
+    procedure WhenLoadTheCertificateMustLoadTheStartDateTime;
+    [Test]
+    procedure WhenLoadTheCertificateMustLoadTheExpiryDateTime;
   end;
 
   [TestFixture]
@@ -109,28 +121,45 @@ type
 
 implementation
 
+uses System.SysUtils;
+
 { TCertificateTest }
+
+procedure TCertificateTest.Setup;
+begin
+  FCertificate := TCertificate.Create;
+
+  FCertificate.Load('..\..\Certificate\Contoso.pfx', '123');
+end;
+
+procedure TCertificateTest.TearDown;
+begin
+  FCertificate.Free;
+end;
+
+procedure TCertificateTest.WhenLoadTheCertificateMustLoadTheCertificateSerialNumber;
+begin
+  Assert.AreEqual('B50FDB03874B1E9C4FE23ABD6CBAAEB2', FCertificate.SerialNumber);
+end;
 
 procedure TCertificateTest.WhenLoadTheCertificateMustLoadTheContext;
 begin
-  var Certificate := TCertificate.Create;
+  Assert.IsNotNil(FCertificate.Context);
+end;
 
-  Certificate.Load('..\..\Certificate\Contoso.pfx', '123');
-
-  Assert.IsNotNil(Certificate.Context);
-
-  Certificate.Free;
+procedure TCertificateTest.WhenLoadTheCertificateMustLoadTheExpiryDateTime;
+begin
+  Assert.AreEqual(EncodeDate(2039, 12, 31), FCertificate.Expiry);
 end;
 
 procedure TCertificateTest.WhenLoadTheCertificateMustLoadThePrivateKeyHandle;
 begin
-  var Certificate := TCertificate.Create;
+  Assert.GreaterThan(0, FCertificate.PrivateKey);
+end;
 
-  Certificate.Load('..\..\Certificate\Contoso.pfx', '123');
-
-  Assert.GreaterThan(0, Certificate.PrivateKey);
-
-  Certificate.Free;
+procedure TCertificateTest.WhenLoadTheCertificateMustLoadTheStartDateTime;
+begin
+  Assert.AreEqual(EncodeDate(2024, 09, 09), FCertificate.Start);
 end;
 
 { TSignerTest }
@@ -215,7 +244,11 @@ end;
 
 procedure TSignerTest.WhenSignAXMLMustExecuteWithoutErrors;
 begin
-  FSigner.SignXML(FCertificate, '/XML', '#SignXML', '<XML><Value Id="SignXML">ABC</Value></XML>');
+  Assert.WillNotRaise(
+    procedure
+    begin
+      FSigner.SignXML(FCertificate, '/XML', '#SignXML', '<XML><Value Id="SignXML">ABC</Value></XML>');
+    end);
 end;
 
 procedure TSignerTest.WhenSignAXMLMustLoadTheSignatureInfoWithTheValuesOfTheSignature;
