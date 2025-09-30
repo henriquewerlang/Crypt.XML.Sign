@@ -209,7 +209,7 @@ uses System.NetEncoding;
 
 function CryptXmlGetSignature(hCryptXml: Pointer; out ppStruct: PCRYPT_XML_SIGNATURE): HRESULT; stdcall; external 'CRYPTXML.dll' name 'CryptXmlGetSignature';
 
-function WriteXML(Callback: PPointer; Data: PByte; Size: Cardinal): HRESULT; stdcall;
+function WriteXML(Callback: Pointer; Data: PByte; Size: Cardinal): HRESULT; stdcall;
 begin
   PString(Callback^)^ := PString(Callback^)^ + TEncoding.UTF8.GetString(TBytes(Data), 0, Size);
   Result := S_OK;
@@ -272,7 +272,7 @@ begin
   Blob.cbData := Length(Certificate);
   Blob.pbData := @Certificate[0];
 
-  FCertificateStore := PFXImportCertStore(@Blob, PChar(Password), 0);
+  FCertificateStore := PFXImportCertStore(@Blob, PWSTR(Password), 0);
 
   if not Assigned(FCertificateStore) then
     RaiseLastOSError;
@@ -282,9 +282,9 @@ begin
   if not Assigned(FContext) then
     RaiseLastOSError;
 
-  var CallerFree: BOOL := FALSE;
+  var CallerFree: BOOL := 0;
 
-  if CryptAcquireCertificatePrivateKey(FContext, CRYPT_ACQUIRE_CACHE_FLAG, nil, FPrivateKey, @KeySpec, @CallerFree) = FALSE then
+  if CryptAcquireCertificatePrivateKey(FContext, CRYPT_ACQUIRE_CACHE_FLAG, nil, FPrivateKey, @KeySpec, @CallerFree) = 0 then
     RaiseLastOSError;
 
   FExpiry := ConvertDate(FContext.pCertInfo^.NotAfter);
@@ -314,7 +314,7 @@ begin
 
   FAlgorithm.cbSize := SizeOf(FAlgorithm);
   FAlgorithm.Encoded.dwCharset := CRYPT_XML_CHARSET_AUTO;
-  FAlgorithm.wszAlgorithm := PChar(Algorithm);
+  FAlgorithm.wszAlgorithm := PWSTR(Algorithm);
 end;
 
 { TCanonicalizationC14C }
@@ -554,7 +554,7 @@ begin
 
   CheckReturn(CryptXmlOpenToEncode(nil, 0, nil, @Properties, 1, @EncodedXML, Result));
 
-  CheckReturn(CryptXmlCreateReference(Result, 0, nil, PChar(URI), nil, @DigestMethod.Algorithm, Length(FTransforms), GetTransforms, ReferenceValue));
+  CheckReturn(CryptXmlCreateReference(Result, 0, nil, PWSTR(URI), nil, @DigestMethod.Algorithm, Length(FTransforms), GetTransforms, ReferenceValue));
 
   CheckReturn(CryptXmlSign(Result, Certificate.PrivateKey, Certificate.KeySpec, 0, CRYPT_XML_KEYINFO_SPEC_PARAM, @KeyInfo, @SignatureMethod.Algorithm, @CanonicalizationMethod.Algorithm));
 end;
@@ -611,7 +611,7 @@ function TSigner.SignXML(const Certificate: TCertificate; const SignaturePath, U
 begin
   var Properties: CRYPT_XML_PROPERTY;
   var ReturnValue := @Result;
-  var ValueTrue: BOOL := TRUE;
+  var ValueTrue: BOOL := 1;
 
   var Signature := DoSign(Certificate, SignaturePath, URI, XML);
 
